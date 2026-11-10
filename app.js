@@ -18,9 +18,32 @@ const countEl = document.getElementById('count');
 const filterEl = document.getElementById('filter');
 const toastEl = document.getElementById('toast');
 
+const tabButtons = document.querySelectorAll('.tab');
+const panelRecords = document.getElementById('panel-records');
+const panelSheet = document.getElementById('panel-sheet');
+
+const sheetSetup = document.getElementById('sheet-setup');
+const sheetSectionEl = document.getElementById('sheet-section');
+const sheetSubjectEl = document.getElementById('sheet-subject');
+const sheetDateEl = document.getElementById('sheet-date');
+const sheetLoadBtn = document.getElementById('sheet-load-btn');
+const sheetChangeBtn = document.getElementById('sheet-change-btn');
+const sheetRoster = document.getElementById('sheet-roster');
+const sheetNoteEl = document.getElementById('sheet-note');
+const sheetSummaryEl = document.getElementById('sheet-summary');
+const sheetRowsEl = document.getElementById('sheet-rows');
+const sheetEmptyEl = document.getElementById('sheet-empty');
+const sheetAddForm = document.getElementById('sheet-add-form');
+const sheetAddNames = document.getElementById('sheet-add-names');
+const sheetSaveBtn = document.getElementById('sheet-save-btn');
+const sheetAllPresent = document.getElementById('sheet-all-present');
+
+const STATUSES = ['Present', 'Absent', 'Late', 'Excused'];
+
 let records = [];
 let editingId = null;
 let toastTimer = null;
+let sheet = null; // { section, subject, date, rows: [{ studentName, status }], dirty } once a class is loaded
 
 // ---- helpers ---------------------------------------------------------------
 
@@ -79,6 +102,8 @@ function formatDay(value) {
 function showLogin(message) {
   records = [];
   editingId = null;
+  closeSheet();
+  selectTab('records');
   appSection.hidden = true;
   logoutBtn.hidden = true;
   loginSection.hidden = false;
@@ -92,6 +117,8 @@ function showApp() {
   loginSection.hidden = true;
   appSection.hidden = false;
   logoutBtn.hidden = false;
+  selectTab('records');
+  sheetDateEl.value = todayISO();
   resetForm();
   loadRecords();
 }
@@ -194,6 +221,7 @@ async function loadRecords() {
   try {
     records = await request(API);
     renderRows();
+    refreshSuggestions();
   } catch (err) {
     records = [];
     renderRows();
@@ -298,6 +326,234 @@ rowsEl.addEventListener('click', (event) => {
   if (!btn) return;
   if (btn.dataset.action === 'edit') startEdit(btn.dataset.id);
   if (btn.dataset.action === 'delete') removeRecord(btn.dataset.id);
+});
+
+// ---- tabs ------------------------------------------------------------------
+
+function selectTab(name) {
+  const sheetTab = name === 'sheet';
+  panelRecords.hidden = sheetTab;
+  panelSheet.hidden = !sheetTab;
+  for (const btn of tabButtons) {
+    const active = btn.dataset.tab === name;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-selected', String(active));
+  }
+}
+
+for (const btn of tabButtons) {
+  btn.addEventListener('click', () => selectTab(btn.dataset.tab));
+}
+
+// ---- class sheet -----------------------------------------------------------
+
+const same = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+
+// Offer the sections and subjects already in the database so names stay consistent.
+function refreshSuggestions() {
+  const fill = (id, values) => {
+    const list = document.getElementById(id);
+    list.replaceChildren();
+    for (const v of [...new Set(values)].sort((a, b) => a.localeCompare(b))) {
+      const opt = document.createElement('option');
+      opt.value = v;
+      list.append(opt);
+    }
+  };
+  fill('section-list', records.map((r) => r.section));
+  fill('subject-list', records.map((r) => r.subjectName));
+}
+
+function setSheetLocked(locked) {
+  for (const el of [sheetSectionEl, sheetSubjectEl, sheetDateEl]) el.disabled = locked;
+  sheetLoadBtn.hidden = locked;
+  sheetChangeBtn.hidden = !locked;
+}
+
+function closeSheet() {
+  sheet = null;
+  sheetRoster.hidden = true;
+  sheetRowsEl.replaceChildren();
+  sheetAddNames.value = '';
+  setSheetLocked(false);
+}
+
+// Builds the roster: every student seen in this section, with the status already
+// saved for this subject and date, or Present by default.
+function openSheet(section, subject, date) {
+  const known = [];
+  for (const r of records) {
+    if (same(r.section, section) && !known.some((n) => same(n, r.studentName))) known.push(r.studentName);
+  }
+  known.sort((a, b) => a.localeCompare(b));
+
+  let alreadySaved = 0;
+  const rows = known.map((studentName) => {
+    const existing = records.find((r) =>
+      same(r.studentName, studentName) && same(r.subjectName, subject) && isoDay(r.date) === date);
+    if (existing) alreadySaved += 1;
+    return { studentName, status: existing ? existing.status : 'Present' };
+  });
+
+  sheet = { section, subject, date, rows, dirty: false, alreadySaved };
+  setSheetLocked(true);
+  sheetRoster.hidden = false;
+  renderSheet();
+}
+
+function renderSheet() {
+  if (!sheet) return;
+  sheetRowsEl.replaceChildren();
+
+  sheet.rows.forEach((row, i) => {
+    const tr = document.createElement('tr');
+    tr.append(cell(String(i + 1)), cell(row.studentName));
+    tr.children[0].className = 'num';
+
+    const statusTd = document.createElement('td');
+    const select = document.createElement('select');
+    select.dataset.index = String(i);
+    select.setAttribute('aria-label', `Status for ${row.studentName}`);
+    for (const status of STATUSES) {
+      const opt = document.createElement('option');
+      opt.textContent = status;
+      opt.selected = status === row.status;
+      select.append(opt);
+    }
+    statusTd.append(select);
+    tr.append(statusTd);
+
+    const removeTd = document.createElement('td');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn small';
+    btn.dataset.remove = String(i);
+    btn.textContent = 'Remove';
+    btn.title = 'Remove from this sheet only. Saved records are not deleted.';
+    removeTd.append(btn);
+    tr.append(removeTd);
+
+    sheetRowsEl.append(tr);
+  });
+
+  sheetEmptyEl.hidden = sheet.rows.length > 0;
+  sheetSaveBtn.disabled = sheet.rows.length === 0;
+  sheetAllPresent.disabled = sheet.rows.length === 0;
+
+  sheetNoteEl.textContent =
+    `${sheet.subject} \u00b7 ${sheet.section} \u00b7 ${formatDay(sheet.date)}. ` +
+    (sheet.alreadySaved
+      ? `${sheet.alreadySaved} student(s) already have a record for this date and subject; saving updates them.`
+      : 'No records for this date and subject yet.');
+  renderSummary();
+}
+
+function renderSummary() {
+  sheetSummaryEl.replaceChildren();
+  for (const status of STATUSES) {
+    const badge = document.createElement('span');
+    badge.className = `badge ${status}`;
+    badge.textContent = `${status}: ${sheet.rows.filter((r) => r.status === status).length}`;
+    sheetSummaryEl.append(badge);
+  }
+}
+
+sheetSetup.addEventListener('submit', (event) => {
+  event.preventDefault();
+  if (!sheetSetup.reportValidity()) return;
+  const section = sheetSectionEl.value.trim().replace(/\s+/g, ' ');
+  const subject = sheetSubjectEl.value.trim().replace(/\s+/g, ' ');
+  if (!section || !subject) {
+    showToast('Enter a section and a subject.', 'error');
+    return;
+  }
+  openSheet(section, subject, sheetDateEl.value);
+});
+
+sheetChangeBtn.addEventListener('click', () => {
+  if (sheet && sheet.dirty && !window.confirm('You have unsaved changes on this sheet. Discard them?')) return;
+  closeSheet();
+});
+
+sheetRowsEl.addEventListener('change', (event) => {
+  const select = event.target.closest('select[data-index]');
+  if (!select || !sheet) return;
+  sheet.rows[Number(select.dataset.index)].status = select.value;
+  sheet.dirty = true;
+  renderSummary();
+});
+
+sheetRowsEl.addEventListener('click', (event) => {
+  const btn = event.target.closest('button[data-remove]');
+  if (!btn || !sheet) return;
+  sheet.rows.splice(Number(btn.dataset.remove), 1);
+  sheet.dirty = true;
+  renderSheet();
+});
+
+sheetAllPresent.addEventListener('click', () => {
+  if (!sheet) return;
+  for (const row of sheet.rows) row.status = 'Present';
+  sheet.dirty = true;
+  renderSheet();
+});
+
+sheetAddForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  if (!sheet) return;
+  const names = sheetAddNames.value.split(/\r?\n/).map((n) => n.trim().replace(/\s+/g, ' ')).filter(Boolean);
+  if (!names.length) {
+    showToast('Type at least one student name.', 'error');
+    return;
+  }
+  let added = 0;
+  let skipped = 0;
+  for (const name of names) {
+    if (name.length > 100 || sheet.rows.some((r) => same(r.studentName, name))) {
+      skipped += 1;
+      continue;
+    }
+    sheet.rows.push({ studentName: name, status: 'Present' });
+    added += 1;
+  }
+  sheetAddNames.value = '';
+  if (added) sheet.dirty = true;
+  renderSheet();
+  showToast(
+    `${added} student(s) added.${skipped ? ` ${skipped} skipped (already on the sheet or too long).` : ''}`,
+    added ? 'ok' : 'error'
+  );
+});
+
+sheetSaveBtn.addEventListener('click', async () => {
+  if (!sheet || !sheet.rows.length) return;
+  const { section, subject, date, rows } = sheet;
+  const ok = window.confirm(`Save attendance for ${rows.length} student(s)?\n${subject}, ${section}, ${formatDay(date)}`);
+  if (!ok) return;
+
+  sheetSaveBtn.disabled = true;
+  try {
+    const result = await request(`${API}/bulk`, {
+      method: 'POST',
+      body: JSON.stringify({
+        date,
+        subjectName: subject,
+        section,
+        entries: rows.map((r) => ({ studentName: r.studentName, status: r.status })),
+      }),
+    });
+    showToast(`Sheet saved: ${result.created} new, ${result.updated} updated.`);
+    sheet.dirty = false;
+    await loadRecords();
+    if (sheet) { // still open (not logged out meanwhile)
+      sheet.alreadySaved = rows.length;
+      renderSheet();
+    }
+  } catch (err) {
+    reportError(err);
+  } finally {
+    sheetSaveBtn.disabled = !sheet || sheet.rows.length === 0;
+  }
 });
 
 init();

@@ -33,6 +33,12 @@
     </section>
 
     <div id="app" hidden>
+      <nav class="tabs" role="tablist" aria-label="Portal sections">
+        <button type="button" role="tab" id="tab-btn-records" class="tab active" data-tab="records" aria-selected="true" aria-controls="panel-records">Records</button>
+        <button type="button" role="tab" id="tab-btn-sheet" class="tab" data-tab="sheet" aria-selected="false" aria-controls="panel-sheet">Class sheet</button>
+      </nav>
+
+      <div id="panel-records" role="tabpanel" aria-labelledby="tab-btn-records">
       <section class="card" aria-labelledby="form-title">
         <h2 id="form-title">Add attendance record</h2>
         <form id="record-form" novalidate>
@@ -88,6 +94,69 @@
         </div>
         <p id="empty" class="muted empty" hidden></p>
       </section>
+      </div>
+
+      <div id="panel-sheet" role="tabpanel" aria-labelledby="tab-btn-sheet" hidden>
+        <section class="card" aria-labelledby="sheet-title">
+          <h2 id="sheet-title">Class attendance sheet</h2>
+          <p class="muted sheet-intro">Pick a class, then mark every student and save the whole sheet at once. Saving again for the same date and subject updates the existing records instead of adding duplicates.</p>
+
+          <form id="sheet-setup" novalidate>
+            <div class="grid">
+              <label>Section
+                <input type="text" id="sheet-section" maxlength="100" list="section-list" required autocomplete="off">
+              </label>
+              <label>Subject name
+                <input type="text" id="sheet-subject" maxlength="100" list="subject-list" required autocomplete="off">
+              </label>
+              <label>Date
+                <input type="date" id="sheet-date" required>
+              </label>
+            </div>
+            <datalist id="section-list"></datalist>
+            <datalist id="subject-list"></datalist>
+            <div class="actions">
+              <button type="submit" id="sheet-load-btn" class="btn primary">Load class list</button>
+              <button type="button" id="sheet-change-btn" class="btn" hidden>Change class</button>
+            </div>
+          </form>
+        </section>
+
+        <section id="sheet-roster" class="card" aria-labelledby="roster-title" hidden>
+          <div class="list-head">
+            <h2 id="roster-title">Students</h2>
+            <button type="button" id="sheet-all-present" class="btn small">Mark all Present</button>
+          </div>
+          <p id="sheet-note" class="muted sheet-note"></p>
+          <div id="sheet-summary" class="summary" aria-live="polite"></div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Student</th>
+                  <th>Status</th>
+                  <th><span class="sr-only">Remove from sheet</span></th>
+                </tr>
+              </thead>
+              <tbody id="sheet-rows"></tbody>
+            </table>
+          </div>
+          <p id="sheet-empty" class="muted empty" hidden>No students yet. Add some below.</p>
+
+          <form id="sheet-add-form" class="add-students" novalidate>
+            <label>Add students (one name per line)
+              <textarea id="sheet-add-names" rows="2" maxlength="5000" placeholder="e.g. Ana Cruz"></textarea>
+            </label>
+            <button type="submit" class="btn">Add to sheet</button>
+          </form>
+
+          <div class="actions">
+            <button type="button" id="sheet-save-btn" class="btn primary">Save sheet</button>
+          </div>
+        </section>
+      </div>
     </div>
   </main>
 
