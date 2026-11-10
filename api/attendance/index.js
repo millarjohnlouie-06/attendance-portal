@@ -1,11 +1,14 @@
 const { getCollection } = require('../../lib/db');
 const { validateRecord } = require('../../lib/validate');
 const { findDuplicate, DUPLICATE_MESSAGE } = require('../../lib/duplicates');
+const { requireAuth } = require('../../lib/auth');
 
 // GET  /api/attendance  -> list all records (newest date first)
 // POST /api/attendance  -> create a record (409 if it duplicates one, unless ?force=1)
 module.exports = async function handler(req, res) {
   try {
+    if (!requireAuth(req, res)) return;
+
     const col = await getCollection();
 
     if (req.method === 'GET') {

@@ -1,4 +1,12 @@
 const API = '/api/attendance';
+const SESSION_API = '/api/session';
+
+const loginSection = document.getElementById('login');
+const loginForm = document.getElementById('login-form');
+const loginBtn = document.getElementById('login-btn');
+const passwordEl = document.getElementById('password');
+const logoutBtn = document.getElementById('logout-btn');
+const appSection = document.getElementById('app');
 
 const form = document.getElementById('record-form');
 const formTitle = document.getElementById('form-title');
@@ -16,10 +24,13 @@ let toastTimer = null;
 
 // ---- helpers ---------------------------------------------------------------
 
+// Sends a JSON request. A 401 from the server (not logged in, or the session
+// expired) sends the user back to the login screen. Pass quiet401 to skip that.
 async function request(url, options = {}) {
+  const { quiet401, ...fetchOptions } = options;
   const res = await fetch(url, {
     headers: { 'Content-Type': 'application/json' },
-    ...options,
+    ...fetchOptions,
   });
   let body = null;
   try { body = await res.json(); } catch { /* empty or non-JSON body */ }
@@ -27,9 +38,17 @@ async function request(url, options = {}) {
     const err = new Error((body && body.error) || `Request failed (${res.status}).`);
     err.status = res.status;
     err.body = body;
+    if (res.status === 401 && !quiet401) {
+      err.handled = true; // the login screen already explains what happened
+      showLogin('Your session has ended. Please log in again.');
+    }
     throw err;
   }
   return body;
+}
+
+function reportError(err) {
+  if (!err.handled) showToast(err.message, 'error');
 }
 
 function showToast(message, type = 'ok') {
@@ -53,6 +72,65 @@ function formatDay(value) {
   return new Date(`${isoDay(value)}T00:00:00Z`).toLocaleDateString(undefined, {
     year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC',
   });
+}
+
+// ---- login / logout --------------------------------------------------------
+
+function showLogin(message) {
+  records = [];
+  editingId = null;
+  appSection.hidden = true;
+  logoutBtn.hidden = true;
+  loginSection.hidden = false;
+  passwordEl.value = '';
+  passwordEl.focus();
+  if (message) showToast(message, 'error');
+}
+
+function showApp() {
+  passwordEl.value = '';
+  loginSection.hidden = true;
+  appSection.hidden = false;
+  logoutBtn.hidden = false;
+  resetForm();
+  loadRecords();
+}
+
+loginForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  loginBtn.disabled = true;
+  try {
+    await request(SESSION_API, {
+      method: 'POST',
+      body: JSON.stringify({ password: passwordEl.value }),
+      quiet401: true,
+    });
+    showApp();
+  } catch (err) {
+    showToast(err.message, 'error');
+    passwordEl.select();
+  } finally {
+    loginBtn.disabled = false;
+  }
+});
+
+logoutBtn.addEventListener('click', async () => {
+  try {
+    await request(SESSION_API, { method: 'DELETE', quiet401: true });
+  } catch { /* the cookie may already be gone; show the login screen anyway */ }
+  showLogin();
+  showToast('You have been logged out.');
+});
+
+async function init() {
+  try {
+    const session = await request(SESSION_API, { quiet401: true });
+    if (session && session.authenticated) {
+      showApp();
+      return;
+    }
+  } catch { /* fall through to the login screen */ }
+  showLogin();
 }
 
 // ---- rendering (textContent only, so stored text can never run as HTML) -----
@@ -121,7 +199,7 @@ async function loadRecords() {
     renderRows();
     emptyEl.hidden = false;
     emptyEl.textContent = 'Could not load records.';
-    showToast(err.message, 'error');
+    reportError(err);
   }
 }
 
@@ -166,7 +244,7 @@ async function removeRecord(id) {
     showToast('Record deleted.');
     await loadRecords();
   } catch (err) {
-    showToast(err.message, 'error');
+    reportError(err);
   }
 }
 
@@ -206,7 +284,7 @@ form.addEventListener('submit', async (event) => {
     resetForm();
     await loadRecords();
   } catch (err) {
-    showToast(err.message, 'error');
+    reportError(err);
   } finally {
     submitBtn.disabled = false;
   }
@@ -222,5 +300,4 @@ rowsEl.addEventListener('click', (event) => {
   if (btn.dataset.action === 'delete') removeRecord(btn.dataset.id);
 });
 
-resetForm();
-loadRecords();
+init();

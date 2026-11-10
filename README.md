@@ -10,6 +10,9 @@ api/attendance/index.js           GET (list), POST (create)
 api/attendance/[id].js            PUT / PATCH (update), DELETE
 lib/db.js                         cached MongoDB connection (reads MONGODB_URI)
 lib/validate.js                   input validation
+lib/duplicates.js                 duplicate-record check
+lib/auth.js                       login session (signed cookie)
+api/session.js                    login (POST), session check (GET), logout (DELETE)
 .env.example                      environment variable template
 ```
 
@@ -25,6 +28,10 @@ Records are stored in the `attendance_records` collection of `LabAttendanceDB_Mi
 | POST | `/api/attendance` | Create a record |
 | PUT / PATCH | `/api/attendance/:id` | Update a record |
 | DELETE | `/api/attendance/:id` | Delete a record |
+| GET / POST / DELETE | `/api/session` | Check login, log in, log out |
+
+All `/api/attendance` routes require login (a signed, HttpOnly session cookie).
+Without `ADMIN_PASSWORD` and `SESSION_SECRET` set, login is refused and no data is served.
 
 ## Run locally (optional)
 
@@ -42,6 +49,8 @@ Records are stored in the `attendance_records` collection of `LabAttendanceDB_Mi
 3. In Vercel, choose Add New > Project and import the GitHub repository.
 4. Before deploying, open Environment Variables and add `MONGODB_URI`
    (your Atlas connection string, with the real username and password).
+   Also add `ADMIN_PASSWORD` (the portal login password) and `SESSION_SECRET`
+   (a random string of 32+ characters used to sign login sessions).
 5. Deploy. If you add or change a variable later, redeploy.
 6. Test add, edit and delete on the production URL.
 

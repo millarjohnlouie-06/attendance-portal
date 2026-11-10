@@ -1,6 +1,7 @@
 const { getCollection, toObjectId } = require('../../lib/db');
 const { validateRecord } = require('../../lib/validate');
 const { findDuplicate, DUPLICATE_MESSAGE } = require('../../lib/duplicates');
+const { requireAuth } = require('../../lib/auth');
 
 // PUT    /api/attendance/:id -> replace the editable fields (all required)
 // PATCH  /api/attendance/:id -> update only the fields that are sent
@@ -9,6 +10,8 @@ const { findDuplicate, DUPLICATE_MESSAGE } = require('../../lib/duplicates');
 // unless ?force=1 is sent.
 module.exports = async function handler(req, res) {
   try {
+    if (!requireAuth(req, res)) return;
+
     const id = toObjectId(req.query.id);
     if (!id) return res.status(400).json({ error: 'Invalid record id.' });
 
