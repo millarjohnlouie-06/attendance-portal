@@ -23,7 +23,12 @@ async function request(url, options = {}) {
   });
   let body = null;
   try { body = await res.json(); } catch { /* empty or non-JSON body */ }
-  if (!res.ok) throw new Error((body && body.error) || `Request failed (${res.status}).`);
+  if (!res.ok) {
+    const err = new Error((body && body.error) || `Request failed (${res.status}).`);
+    err.status = res.status;
+    err.body = body;
+    throw err;
+  }
   return body;
 }
 
@@ -165,6 +170,18 @@ async function removeRecord(id) {
   }
 }
 
+function duplicateMessage(d) {
+  return `${d.studentName} already has a "${d.status}" record for ${d.subjectName} on ${formatDay(d.date)}.\n\nSave this one anyway?`;
+}
+
+function save(payload, force) {
+  const suffix = force ? '?force=1' : '';
+  if (editingId) {
+    return request(`${API}/${editingId}${suffix}`, { method: 'PUT', body: JSON.stringify(payload) });
+  }
+  return request(`${API}${suffix}`, { method: 'POST', body: JSON.stringify(payload) });
+}
+
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!form.reportValidity()) return;
@@ -174,10 +191,16 @@ form.addEventListener('submit', async (event) => {
 
   submitBtn.disabled = true;
   try {
-    if (wasEditing) {
-      await request(`${API}/${editingId}`, { method: 'PUT', body: JSON.stringify(payload) });
-    } else {
-      await request(API, { method: 'POST', body: JSON.stringify(payload) });
+    try {
+      await save(payload, false);
+    } catch (err) {
+      if (err.status !== 409 || !err.body || !err.body.duplicate) throw err;
+      // Duplicate found: let the admin decide whether to save it anyway.
+      if (!window.confirm(duplicateMessage(err.body.duplicate))) {
+        showToast('Not saved: this looks like a duplicate.', 'error');
+        return;
+      }
+      await save(payload, true);
     }
     showToast(wasEditing ? 'Record updated.' : 'Record added.');
     resetForm();

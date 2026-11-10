@@ -1,8 +1,9 @@
 const { getCollection } = require('../../lib/db');
 const { validateRecord } = require('../../lib/validate');
+const { findDuplicate, DUPLICATE_MESSAGE } = require('../../lib/duplicates');
 
 // GET  /api/attendance  -> list all records (newest date first)
-// POST /api/attendance  -> create a record
+// POST /api/attendance  -> create a record (409 if it duplicates one, unless ?force=1)
 module.exports = async function handler(req, res) {
   try {
     const col = await getCollection();
@@ -20,6 +21,12 @@ module.exports = async function handler(req, res) {
     if (req.method === 'POST') {
       const { data, error } = validateRecord(req.body);
       if (error) return res.status(400).json({ error });
+
+      const force = Boolean(req.query && req.query.force === '1');
+      if (!force) {
+        const duplicate = await findDuplicate(col, data);
+        if (duplicate) return res.status(409).json({ error: DUPLICATE_MESSAGE, duplicate });
+      }
 
       const doc = { ...data, createdAt: new Date() };
       const result = await col.insertOne(doc);
