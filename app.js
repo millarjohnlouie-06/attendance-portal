@@ -162,18 +162,25 @@ async function init() {
 
 // ---- rendering (textContent only, so stored text can never run as HTML) -----
 
-function cell(text) {
+function cell(text, label) {
   const td = document.createElement('td');
+  if (label) td.dataset.label = label;
   td.textContent = text;
   return td;
 }
 
 function renderRows() {
   const q = filterEl.value.trim().toLowerCase();
-  const visible = q
+  let visible = q
     ? records.filter((r) =>
         [r.studentName, r.subjectName, r.section].some((v) => String(v).toLowerCase().includes(q)))
-    : records;
+    : records.slice();
+  if (sort.key) {
+    const f = (r) => (sort.key === 'date' ? isoDay(r.date) : String(r[sort.key]).toLowerCase());
+    visible.sort((x, y) => (f(x) < f(y) ? -sort.dir : f(x) > f(y) ? sort.dir : 0));
+  }
+  document.querySelectorAll('#panel-records th[data-sort]').forEach((th) =>
+    th.setAttribute('aria-sort', th.dataset.sort === sort.key ? (sort.dir > 0 ? 'ascending' : 'descending') : 'none'));
 
   rowsEl.replaceChildren();
 
@@ -181,12 +188,13 @@ function renderRows() {
     const tr = document.createElement('tr');
     if (r._id === editingId) tr.className = 'editing';
 
-    tr.append(cell(formatDay(r.date)), cell(r.studentName), cell(r.subjectName), cell(r.section));
+    tr.append(cell(formatDay(r.date), 'Date'), cell(r.studentName, 'Student'), cell(r.subjectName, 'Subject'), cell(r.section, 'Section'));
 
     const statusTd = document.createElement('td');
     const badge = document.createElement('span');
     badge.className = `badge ${r.status}`;
     badge.textContent = r.status;
+    statusTd.dataset.label = 'Status';
     statusTd.append(badge);
     tr.append(statusTd);
 
@@ -206,22 +214,25 @@ function renderRows() {
     rowsEl.append(tr);
   }
 
+  renderTiles(visible);
   countEl.textContent = records.length ? `(${visible.length} of ${records.length})` : '';
   emptyEl.hidden = visible.length > 0;
   if (!visible.length) {
-    emptyEl.textContent = records.length ? 'No records match your filter.' : 'No attendance records yet.';
+    emptyEl.textContent = records.length ? 'No records match your filter.' : 'No records yet. Add one above, or mark a whole class on the Class sheet tab.';
   }
 }
 
 // ---- data actions ----------------------------------------------------------
 
 async function loadRecords() {
-  emptyEl.hidden = false;
-  emptyEl.textContent = 'Loading records...';
+  emptyEl.hidden = true;
+  rowsEl.replaceChildren(...Array.from({ length: 5 }, skelRow));
   try {
     records = await request(API);
     renderRows();
     refreshSuggestions();
+    pickReportDay();
+    renderReports();
   } catch (err) {
     records = [];
     renderRows();
@@ -261,8 +272,8 @@ function startEdit(id) {
 async function removeRecord(id) {
   const r = records.find((x) => x._id === id);
   if (!r) return;
-  const ok = window.confirm(
-    `Delete the record for ${r.studentName} (${r.subjectName}, ${formatDay(r.date)})?\nThis cannot be undone.`
+  const ok = await ask(
+    `Delete the record for ${r.studentName} (${r.subjectName}, ${formatDay(r.date)})?\nThis cannot be undone.`, 'Delete', true
   );
   if (!ok) return;
 
@@ -277,7 +288,7 @@ async function removeRecord(id) {
 }
 
 function duplicateMessage(d) {
-  return `${d.studentName} already has a "${d.status}" record for ${d.subjectName} on ${formatDay(d.date)}.\n\nSave this one anyway?`;
+  return `Possible duplicate\n${d.studentName} already has a "${d.status}" record for ${d.subjectName} on ${formatDay(d.date)}.\nSave this one anyway?`;
 }
 
 function save(payload, force) {
@@ -302,7 +313,7 @@ form.addEventListener('submit', async (event) => {
     } catch (err) {
       if (err.status !== 409 || !err.body || !err.body.duplicate) throw err;
       // Duplicate found: let the admin decide whether to save it anyway.
-      if (!window.confirm(duplicateMessage(err.body.duplicate))) {
+      if (!(await ask(duplicateMessage(err.body.duplicate), 'Save anyway'))) {
         showToast('Not saved: this looks like a duplicate.', 'error');
         return;
       }
@@ -331,9 +342,10 @@ rowsEl.addEventListener('click', (event) => {
 // ---- tabs ------------------------------------------------------------------
 
 function selectTab(name) {
-  const sheetTab = name === 'sheet';
-  panelRecords.hidden = sheetTab;
-  panelSheet.hidden = !sheetTab;
+  panelRecords.hidden = name !== 'records';
+  panelSheet.hidden = name !== 'sheet';
+  panelReports.hidden = name !== 'reports';
+  if (name === 'reports') renderReports();
   for (const btn of tabButtons) {
     const active = btn.dataset.tab === name;
     btn.classList.toggle('active', active);
@@ -411,16 +423,22 @@ function renderSheet() {
     tr.children[0].className = 'num';
 
     const statusTd = document.createElement('td');
-    const select = document.createElement('select');
-    select.dataset.index = String(i);
-    select.setAttribute('aria-label', `Status for ${row.studentName}`);
+    statusTd.className = 'wide';
+    const group = document.createElement('div');
+    group.className = 'seg';
+    group.setAttribute('role', 'group');
+    group.setAttribute('aria-label', `Status for ${row.studentName}`);
     for (const status of STATUSES) {
-      const opt = document.createElement('option');
-      opt.textContent = status;
-      opt.selected = status === row.status;
-      select.append(opt);
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.dataset.index = String(i);
+      b.dataset.status = status;
+      b.className = `seg-btn ${status}${status === row.status ? ' on' : ''}`;
+      b.setAttribute('aria-pressed', String(status === row.status));
+      b.textContent = status;
+      group.append(b);
     }
-    statusTd.append(select);
+    statusTd.append(group);
     tr.append(statusTd);
 
     const removeTd = document.createElement('td');
@@ -470,20 +488,23 @@ sheetSetup.addEventListener('submit', (event) => {
   openSheet(section, subject, sheetDateEl.value);
 });
 
-sheetChangeBtn.addEventListener('click', () => {
-  if (sheet && sheet.dirty && !window.confirm('You have unsaved changes on this sheet. Discard them?')) return;
+sheetChangeBtn.addEventListener('click', async () => {
+  if (sheet && sheet.dirty && !(await ask('Discard unsaved changes?\nThe statuses you changed have not been saved.', 'Discard', true))) return;
   closeSheet();
 });
 
-sheetRowsEl.addEventListener('change', (event) => {
-  const select = event.target.closest('select[data-index]');
-  if (!select || !sheet) return;
-  sheet.rows[Number(select.dataset.index)].status = select.value;
-  sheet.dirty = true;
-  renderSummary();
-});
-
 sheetRowsEl.addEventListener('click', (event) => {
+  const seg = event.target.closest('button[data-status]');
+  if (seg && sheet) {
+    sheet.rows[Number(seg.dataset.index)].status = seg.dataset.status;
+    sheet.dirty = true;
+    for (const b of seg.parentElement.children) {
+      b.classList.toggle('on', b === seg);
+      b.setAttribute('aria-pressed', String(b === seg));
+    }
+    renderSummary();
+    return;
+  }
   const btn = event.target.closest('button[data-remove]');
   if (!btn || !sheet) return;
   sheet.rows.splice(Number(btn.dataset.remove), 1);
@@ -528,7 +549,7 @@ sheetAddForm.addEventListener('submit', (event) => {
 sheetSaveBtn.addEventListener('click', async () => {
   if (!sheet || !sheet.rows.length) return;
   const { section, subject, date, rows } = sheet;
-  const ok = window.confirm(`Save attendance for ${rows.length} student(s)?\n${subject}, ${section}, ${formatDay(date)}`);
+  const ok = await ask(`Save attendance for ${rows.length} student(s)?\n${subject}, ${section}, ${formatDay(date)}`, 'Save sheet');
   if (!ok) return;
 
   sheetSaveBtn.disabled = true;
@@ -555,5 +576,143 @@ sheetSaveBtn.addEventListener('click', async () => {
     sheetSaveBtn.disabled = !sheet || sheet.rows.length === 0;
   }
 });
+
+// ---- dialogs, tiles, sorting, reports, theme --------------------------------
+
+const dlg = document.getElementById('dlg');
+const dlgTitle = document.getElementById('dlg-title');
+const dlgMsg = document.getElementById('dlg-msg');
+const dlgOk = document.getElementById('dlg-ok');
+const panelReports = document.getElementById('panel-reports');
+const tilesEl = document.getElementById('tiles');
+const repGroup = document.getElementById('rep-group');
+const repDate = document.getElementById('rep-date');
+const repBars = document.getElementById('rep-bars');
+const repDonut = document.getElementById('rep-donut');
+const repLegend = document.getElementById('rep-legend');
+const themeBtn = document.getElementById('theme-btn');
+let sort = { key: null, dir: 1 };
+let repDateTouched = false;
+
+// First line of the message is the title, the rest is the detail.
+function ask(message, okLabel = 'Confirm', danger = false) {
+  const [title, ...rest] = message.split('\n');
+  dlgTitle.textContent = title;
+  dlgMsg.textContent = rest.join('\n').trim();
+  dlgMsg.hidden = !dlgMsg.textContent;
+  dlgOk.textContent = okLabel;
+  dlgOk.className = `btn ${danger ? 'danger' : 'primary'}`;
+  dlg.returnValue = 'cancel';
+  return new Promise((resolve) => {
+    dlg.addEventListener('close', () => resolve(dlg.returnValue === 'ok'), { once: true });
+    dlg.showModal();
+  });
+}
+
+function skelRow() {
+  const tr = document.createElement('tr');
+  for (let i = 0; i < 6; i += 1) {
+    const td = document.createElement('td');
+    td.append(Object.assign(document.createElement('span'), { className: 'skel' }));
+    tr.append(td);
+  }
+  return tr;
+}
+
+function renderTiles(list) {
+  tilesEl.replaceChildren();
+  for (const s of ['Total', ...STATUSES]) {
+    const tile = document.createElement('div');
+    tile.className = `tile ${s}`;
+    const num = document.createElement('b');
+    num.textContent = s === 'Total' ? list.length : list.filter((r) => r.status === s).length;
+    const label = document.createElement('span');
+    label.textContent = s;
+    tile.append(num, label);
+    tilesEl.append(tile);
+  }
+}
+
+document.querySelector('#panel-records thead').addEventListener('click', (event) => {
+  const th = event.target.closest('th[data-sort]');
+  if (!th) return;
+  sort = sort.key === th.dataset.sort ? { key: sort.key, dir: -sort.dir } : { key: th.dataset.sort, dir: 1 };
+  renderRows();
+});
+
+function rate(list) {
+  const counted = list.filter((r) => r.status !== 'Excused').length;
+  const attended = list.filter((r) => r.status === 'Present' || r.status === 'Late').length;
+  return counted ? Math.round((attended / counted) * 100) : null;
+}
+
+// Show today if it has records, otherwise the most recent day that does.
+function pickReportDay() {
+  if (repDateTouched) return;
+  const days = records.map((r) => isoDay(r.date)).sort();
+  repDate.value = days.includes(todayISO()) || !days.length ? todayISO() : days[days.length - 1];
+}
+
+function renderReports() {
+  const key = repGroup.value;
+  const groups = new Map();
+  for (const r of records) groups.set(r[key], [...(groups.get(r[key]) || []), r]);
+  repBars.replaceChildren();
+  [...groups]
+    .map(([name, list]) => ({ name, pct: rate(list), n: list.length }))
+    .filter((g) => g.pct !== null)
+    .sort((x, y) => y.pct - x.pct)
+    .forEach((g) => {
+      const row = document.createElement('div');
+      row.className = 'bar-row';
+      const name = Object.assign(document.createElement('span'), { className: 'bar-name', textContent: g.name, title: `${g.name}: ${g.n} records` });
+      const track = Object.assign(document.createElement('div'), { className: 'bar-track' });
+      const fill = Object.assign(document.createElement('div'), { className: 'bar-fill' });
+      fill.style.width = `${g.pct}%`;
+      track.append(fill);
+      row.append(name, track, Object.assign(document.createElement('span'), { textContent: `${g.pct}%` }));
+      repBars.append(row);
+    });
+  document.getElementById('rep-bars-empty').hidden = repBars.children.length > 0;
+
+  const day = records.filter((r) => isoDay(r.date) === repDate.value);
+  document.getElementById('rep-donut-empty').hidden = day.length > 0;
+  repDonut.hidden = repLegend.hidden = !day.length;
+  repLegend.replaceChildren();
+  let from = 0;
+  const stops = [];
+  for (const s of STATUSES) {
+    const n = day.filter((r) => r.status === s).length;
+    stops.push(`var(--c-${s}) ${(from / day.length) * 100}% ${((from + n) / day.length) * 100}%`);
+    from += n;
+    const li = document.createElement('li');
+    const dot = document.createElement('i');
+    dot.style.setProperty('--tc', `var(--c-${s})`);
+    li.append(dot, `${s}: ${n}`);
+    repLegend.append(li);
+  }
+  repDonut.style.background = day.length ? `conic-gradient(${stops.join(',')})` : '';
+  repDonut.dataset.total = day.length;
+  repDonut.setAttribute('aria-label', `${day.length} records on ${repDate.value}`);
+}
+
+repGroup.addEventListener('change', renderReports);
+repDate.addEventListener('input', () => { repDateTouched = true; renderReports(); });
+
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  themeBtn.textContent = t === 'dark' ? 'Light mode' : 'Dark mode';
+  themeBtn.setAttribute('aria-label', t === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
+}
+themeBtn.addEventListener('click', () => {
+  const t = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  try { localStorage.setItem('theme', t); } catch { /* private mode: the choice just won't persist */ }
+  applyTheme(t);
+});
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+  try { if (localStorage.getItem('theme')) return; } catch { /* ignore */ }
+  applyTheme(e.matches ? 'dark' : 'light');
+});
+applyTheme(document.documentElement.dataset.theme || 'light');
 
 init();
