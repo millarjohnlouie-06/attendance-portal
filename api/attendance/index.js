@@ -7,7 +7,8 @@ const { requireAuth } = require('../../lib/auth');
 // POST /api/attendance  -> create a record (409 if it duplicates one, unless ?force=1)
 module.exports = async function handler(req, res) {
   try {
-    if (!requireAuth(req, res)) return;
+    const user = await requireAuth(req, res);
+    if (!user) return;
 
     const col = await getCollection();
 
@@ -31,7 +32,7 @@ module.exports = async function handler(req, res) {
         if (duplicate) return res.status(409).json({ error: DUPLICATE_MESSAGE, duplicate });
       }
 
-      const doc = { ...data, createdAt: new Date() };
+      const doc = { ...data, createdAt: new Date(), createdBy: user.username };
       const result = await col.insertOne(doc);
       return res.status(201).json({ ...doc, _id: result.insertedId });
     }

@@ -1,16 +1,20 @@
 const { getCollection, toObjectId } = require('../../lib/db');
 const { validateRecord } = require('../../lib/validate');
 const { findDuplicate, DUPLICATE_MESSAGE } = require('../../lib/duplicates');
-const { requireAuth } = require('../../lib/auth');
+const { requireAuth, requireRole } = require('../../lib/auth');
 
 // PUT    /api/attendance/:id -> replace the editable fields (all required)
 // PATCH  /api/attendance/:id -> update only the fields that are sent
-// DELETE /api/attendance/:id -> remove the record
+// DELETE /api/attendance/:id -> remove the record (admin only)
 // PUT and PATCH return 409 if the result would duplicate another record,
 // unless ?force=1 is sent.
 module.exports = async function handler(req, res) {
   try {
-    if (!requireAuth(req, res)) return;
+    // Any logged-in account may edit; only an admin may delete.
+    const user = req.method === 'DELETE'
+      ? await requireRole(req, res, 'admin')
+      : await requireAuth(req, res);
+    if (!user) return;
 
     const id = toObjectId(req.query.id);
     if (!id) return res.status(400).json({ error: 'Invalid record id.' });
@@ -33,7 +37,7 @@ module.exports = async function handler(req, res) {
 
       const updated = await col.findOneAndUpdate(
         { _id: id },
-        { $set: { ...data, updatedAt: new Date() } },
+        { $set: { ...data, updatedAt: new Date(), updatedBy: user.username } },
         { returnDocument: 'after' }
       );
       if (!updated) return res.status(404).json({ error: 'Record not found.' });

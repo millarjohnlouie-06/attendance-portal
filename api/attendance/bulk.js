@@ -11,7 +11,8 @@ const NAME_COLLATION = { locale: 'en', strength: 2 }; // case-insensitive, like 
 // creates duplicates); otherwise a new record is created.
 module.exports = async function handler(req, res) {
   try {
-    if (!requireAuth(req, res)) return;
+    const user = await requireAuth(req, res);
+    if (!user) return;
 
     if (req.method !== 'POST') {
       res.setHeader('Allow', 'POST');
@@ -28,12 +29,13 @@ module.exports = async function handler(req, res) {
       updateOne: {
         filter: { date: data.date, subjectName: data.subjectName, studentName: entry.studentName },
         update: {
-          $set: { section: data.section, status: entry.status, updatedAt: now },
+          $set: { section: data.section, status: entry.status, updatedAt: now, updatedBy: user.username },
           $setOnInsert: {
             date: data.date,
             subjectName: data.subjectName,
             studentName: entry.studentName,
             createdAt: now,
+            createdBy: user.username,
           },
         },
         upsert: true,

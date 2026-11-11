@@ -157,7 +157,12 @@ td select { min-width: 120px; }
 .topbar .wrap { flex-wrap: wrap; }
 .brand { display: flex; align-items: center; gap: 12px; }
 .logo { width: 40px; height: 40px; flex: none; }
-.top-actions { display: flex; gap: 8px; }
+.top-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.user-chip { font-size: 0.85rem; font-weight: 600; padding: 4px 12px; border-radius: 999px; background: rgb(255 255 255 / 0.18); }
+
+/* ---- login form ---- */
+#login-form { display: grid; gap: 14px; }
+#login-form .actions { margin-top: 2px; }
 
 /* ---- tiles ---- */
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 20px; }

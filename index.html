@@ -19,6 +19,7 @@
         </div>
       </div>
       <div class="top-actions">
+        <span id="user-chip" class="user-chip" hidden></span>
         <button type="button" id="theme-btn" class="btn">Dark mode</button>
         <button type="button" id="logout-btn" class="btn" hidden>Log out</button>
       </div>
@@ -29,8 +30,11 @@
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
     <section id="login" class="card" aria-labelledby="login-title" hidden>
-      <h2 id="login-title">Admin login</h2>
+      <h2 id="login-title">Log in</h2>
       <form id="login-form">
+        <label>Username
+          <input type="text" id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+        </label>
         <label>Password
           <input type="password" id="password" name="password" autocomplete="current-password" required>
         </label>
@@ -45,6 +49,7 @@
         <button type="button" role="tab" id="tab-btn-records" class="tab active" data-tab="records" aria-selected="true" aria-controls="panel-records">Records</button>
         <button type="button" role="tab" id="tab-btn-sheet" class="tab" data-tab="sheet" aria-selected="false" aria-controls="panel-sheet">Class sheet</button>
         <button type="button" role="tab" id="tab-btn-reports" class="tab" data-tab="reports" aria-selected="false" aria-controls="panel-reports">Reports</button>
+        <button type="button" role="tab" id="tab-btn-users" class="tab" data-tab="users" aria-selected="false" aria-controls="panel-users" hidden>Users</button>
       </nav>
 
       <div id="panel-records" role="tabpanel" aria-labelledby="tab-btn-records">
@@ -191,6 +196,49 @@
             <p id="rep-donut-empty" class="muted empty" hidden>No records on this day.</p>
           </section>
         </div>
+      </div>
+
+      <div id="panel-users" role="tabpanel" aria-labelledby="tab-btn-users" hidden>
+        <section class="card" aria-labelledby="user-form-title">
+          <h2 id="user-form-title">Add account</h2>
+          <form id="user-form" novalidate>
+            <div class="grid">
+              <label>Username
+                <input type="text" id="new-username" maxlength="30" autocomplete="off" autocapitalize="none" spellcheck="false" required>
+              </label>
+              <label>Password (at least 8 characters)
+                <input type="password" id="new-password" minlength="8" maxlength="72" autocomplete="new-password" required>
+              </label>
+              <label>Role
+                <select id="new-role">
+                  <option value="teacher">Teacher (add and edit)</option>
+                  <option value="admin">Admin (also delete, manage accounts)</option>
+                </select>
+              </label>
+            </div>
+            <div class="actions">
+              <button type="submit" id="user-add-btn" class="btn primary">Add account</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="card" aria-labelledby="users-title">
+          <h2 id="users-title">Accounts <span id="users-count" class="muted"></span></h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Username</th>
+                  <th>Role</th>
+                  <th>Created</th>
+                  <th><span class="sr-only">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody id="users-rows"></tbody>
+            </table>
+          </div>
+          <p id="users-empty" class="muted empty" hidden>No accounts yet.</p>
+        </section>
       </div>
     </div>
   </main>

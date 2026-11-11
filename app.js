@@ -1,11 +1,14 @@
 const API = '/api/attendance';
 const SESSION_API = '/api/session';
+const USERS_API = '/api/users';
 
 const loginSection = document.getElementById('login');
 const loginForm = document.getElementById('login-form');
 const loginBtn = document.getElementById('login-btn');
+const usernameEl = document.getElementById('username');
 const passwordEl = document.getElementById('password');
 const logoutBtn = document.getElementById('logout-btn');
+const userChip = document.getElementById('user-chip');
 const appSection = document.getElementById('app');
 
 const form = document.getElementById('record-form');
@@ -21,6 +24,17 @@ const toastEl = document.getElementById('toast');
 const tabButtons = document.querySelectorAll('.tab');
 const panelRecords = document.getElementById('panel-records');
 const panelSheet = document.getElementById('panel-sheet');
+const panelUsers = document.getElementById('panel-users');
+const tabUsersBtn = document.getElementById('tab-btn-users');
+
+const userForm = document.getElementById('user-form');
+const newUsernameEl = document.getElementById('new-username');
+const newPasswordEl = document.getElementById('new-password');
+const newRoleEl = document.getElementById('new-role');
+const userAddBtn = document.getElementById('user-add-btn');
+const usersRowsEl = document.getElementById('users-rows');
+const usersEmptyEl = document.getElementById('users-empty');
+const usersCountEl = document.getElementById('users-count');
 
 const sheetSetup = document.getElementById('sheet-setup');
 const sheetSectionEl = document.getElementById('sheet-section');
@@ -40,6 +54,8 @@ const sheetAllPresent = document.getElementById('sheet-all-present');
 
 const STATUSES = ['Present', 'Absent', 'Late', 'Excused'];
 
+let currentUser = null; // { _id, username, role } while logged in
+let users = []; // accounts, loaded only for admins
 let records = [];
 let editingId = null;
 let toastTimer = null;
@@ -99,24 +115,37 @@ function formatDay(value) {
 
 // ---- login / logout --------------------------------------------------------
 
+const isAdmin = () => Boolean(currentUser) && currentUser.role === 'admin';
+const roleLabel = (role) => role.charAt(0).toUpperCase() + role.slice(1);
+
 function showLogin(message) {
+  currentUser = null;
   records = [];
+  users = [];
   editingId = null;
   closeSheet();
+  userForm.reset();
   selectTab('records');
   appSection.hidden = true;
   logoutBtn.hidden = true;
+  userChip.hidden = true;
+  tabUsersBtn.hidden = true;
   loginSection.hidden = false;
+  usernameEl.value = '';
   passwordEl.value = '';
-  passwordEl.focus();
+  usernameEl.focus();
   if (message) showToast(message, 'error');
 }
 
-function showApp() {
+function showApp(user) {
+  currentUser = user;
   passwordEl.value = '';
   loginSection.hidden = true;
   appSection.hidden = false;
   logoutBtn.hidden = false;
+  userChip.textContent = `${user.username} · ${roleLabel(user.role)}`;
+  userChip.hidden = false;
+  tabUsersBtn.hidden = !isAdmin();
   selectTab('records');
   sheetDateEl.value = todayISO();
   resetForm();
@@ -127,12 +156,12 @@ loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   loginBtn.disabled = true;
   try {
-    await request(SESSION_API, {
+    const session = await request(SESSION_API, {
       method: 'POST',
-      body: JSON.stringify({ password: passwordEl.value }),
+      body: JSON.stringify({ username: usernameEl.value, password: passwordEl.value }),
       quiet401: true,
     });
-    showApp();
+    showApp(session.user);
   } catch (err) {
     showToast(err.message, 'error');
     passwordEl.select();
@@ -152,8 +181,8 @@ logoutBtn.addEventListener('click', async () => {
 async function init() {
   try {
     const session = await request(SESSION_API, { quiet401: true });
-    if (session && session.authenticated) {
-      showApp();
+    if (session && session.authenticated && session.user) {
+      showApp(session.user);
       return;
     }
   } catch { /* fall through to the login screen */ }
@@ -200,7 +229,10 @@ function renderRows() {
 
     const actionsTd = document.createElement('td');
     actionsTd.className = 'row-actions';
-    for (const [action, label, extra] of [['edit', 'Edit', ''], ['delete', 'Delete', ' danger']]) {
+    // Teachers can add and edit; only admins get the Delete button (the server enforces this too).
+    const actions = [['edit', 'Edit', '']];
+    if (isAdmin()) actions.push(['delete', 'Delete', ' danger']);
+    for (const [action, label, extra] of actions) {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = `btn small${extra}`;
@@ -342,10 +374,13 @@ rowsEl.addEventListener('click', (event) => {
 // ---- tabs ------------------------------------------------------------------
 
 function selectTab(name) {
+  if (name === 'users' && !isAdmin()) name = 'records'; // the Users tab is admin only
   panelRecords.hidden = name !== 'records';
   panelSheet.hidden = name !== 'sheet';
   panelReports.hidden = name !== 'reports';
+  panelUsers.hidden = name !== 'users';
   if (name === 'reports') renderReports();
+  if (name === 'users') loadUsers();
   for (const btn of tabButtons) {
     const active = btn.dataset.tab === name;
     btn.classList.toggle('active', active);
@@ -356,6 +391,89 @@ function selectTab(name) {
 for (const btn of tabButtons) {
   btn.addEventListener('click', () => selectTab(btn.dataset.tab));
 }
+
+// ---- accounts (admin only) -------------------------------------------------
+
+async function loadUsers() {
+  try {
+    users = await request(USERS_API);
+    renderUsers();
+  } catch (err) {
+    users = [];
+    renderUsers();
+    reportError(err);
+  }
+}
+
+function renderUsers() {
+  usersRowsEl.replaceChildren();
+  for (const u of users) {
+    const tr = document.createElement('tr');
+    const you = currentUser && u._id === currentUser._id;
+    tr.append(
+      cell(you ? `${u.username} (you)` : u.username, 'Username'),
+      cell(roleLabel(u.role), 'Role'),
+      cell(formatDay(u.createdAt), 'Created')
+    );
+
+    const actionsTd = document.createElement('td');
+    actionsTd.className = 'row-actions';
+    if (you) { // you cannot delete your own account
+      actionsTd.append(Object.assign(document.createElement('span'), { className: 'muted', textContent: '—' }));
+    } else {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn small danger';
+      btn.dataset.id = u._id;
+      btn.textContent = 'Delete';
+      actionsTd.append(btn);
+    }
+    tr.append(actionsTd);
+    usersRowsEl.append(tr);
+  }
+  usersCountEl.textContent = users.length ? `(${users.length})` : '';
+  usersEmptyEl.hidden = users.length > 0;
+}
+
+userForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!userForm.reportValidity()) return;
+
+  userAddBtn.disabled = true;
+  try {
+    const created = await request(USERS_API, {
+      method: 'POST',
+      body: JSON.stringify({
+        username: newUsernameEl.value,
+        password: newPasswordEl.value,
+        role: newRoleEl.value,
+      }),
+    });
+    showToast(`Account "${created.username}" created.`);
+    userForm.reset();
+    await loadUsers();
+  } catch (err) {
+    reportError(err);
+  } finally {
+    userAddBtn.disabled = false;
+  }
+});
+
+usersRowsEl.addEventListener('click', async (event) => {
+  const btn = event.target.closest('button[data-id]');
+  if (!btn) return;
+  const u = users.find((x) => x._id === btn.dataset.id);
+  if (!u) return;
+  const ok = await ask(`Delete the account "${u.username}"?\nThey will no longer be able to log in. Their attendance records are kept.`, 'Delete', true);
+  if (!ok) return;
+  try {
+    await request(`${USERS_API}/${u._id}`, { method: 'DELETE' });
+    showToast('Account deleted.');
+    await loadUsers();
+  } catch (err) {
+    reportError(err);
+  }
+});
 
 // ---- class sheet -----------------------------------------------------------
 
