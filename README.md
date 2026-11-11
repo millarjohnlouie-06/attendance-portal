@@ -11,11 +11,15 @@ api/attendance/[id].js            PUT / PATCH (update), DELETE
 api/attendance/bulk.js            POST (save a whole class sheet)
 api/users/index.js                GET (list accounts), POST (create account), admin only
 api/users/[id].js                 DELETE (remove an account), admin only
+api/audit.js                      GET the audit log (paged, filterable), admin only
+api/export.js                     GET an Excel or PDF file of the records
 lib/db.js                         cached MongoDB connection (reads MONGODB_URI)
 lib/validate.js                   input validation
 lib/duplicates.js                 duplicate-record check
 lib/users.js                      accounts: bcrypt hashing, validation, first-run admin setup
 lib/auth.js                       login session (signed cookie) and role checks
+lib/audit.js                      writes audit log entries (what changed, who, when)
+lib/export.js                     builds the .xlsx (exceljs) and .pdf (pdf-lib) files
 api/session.js                    login (POST), session check (GET), logout (DELETE)
 .env.example                      environment variable template
 ```
@@ -26,8 +30,10 @@ Records are stored in the `attendance_records` collection of `LabAttendanceDB_Mi
 (`updatedAt` and `updatedBy` are added when a record is edited).
 
 Accounts are stored in the `users` collection:
-`{ username, passwordHash, role, createdAt }`. Passwords are hashed with bcrypt and
-never sent to the browser.
+`{ username, passwordHash, role, createdAt }` (student accounts also have `studentName`).
+Passwords are hashed with bcrypt and never sent to the browser.
+
+The audit log is the `audit_log` collection: `{ at, actor, actorRole, action, summary, details }`.
 
 ## API
 
@@ -41,6 +47,11 @@ never sent to the browser.
 | GET / POST / DELETE | `/api/session` | Check login, log in with `{ username, password }`, log out |
 | GET / POST | `/api/users` | List accounts, create an account (admin only) |
 | DELETE | `/api/users/:id` | Delete an account (admin only) |
+| GET | `/api/audit` | The audit log, newest first (admin only). Filters: `group`, `actor`; paging: `before`, `limit` |
+| GET | `/api/export?format=xlsx\|pdf` | Download records as Excel or PDF (admin or teacher). Optional: `q`, `from`, `to`, `sort`, `dir` |
+
+`GET /api/attendance` returns every record to an admin or teacher, but only the signed-in
+student's own records to a student (the server decides this; the request cannot change it).
 
 All `/api/attendance` routes require login (a signed, HttpOnly session cookie).
 Without `SESSION_SECRET` set, login is refused and no data is served.
@@ -51,8 +62,14 @@ Every person logs in with their own username and password.
 
 | Role | Can do |
 |---|---|
-| `teacher` | Add, edit and view records, save class sheets, view reports |
-| `admin` | Everything a teacher can, plus delete records and manage accounts (Users tab) |
+| `student` | Read-only **My attendance** page: only their own records, totals and attendance rate |
+| `teacher` | Add, edit and view records, save class sheets, view reports, export to Excel / PDF |
+| `admin` | Everything a teacher can, plus delete records, manage accounts (Users tab) and read the Audit log |
+
+A student account is linked to a student by name. When the admin creates it, the name must be
+written as it is in the attendance records (capitals and extra spaces do not matter). Records
+are matched by name, so two different students with exactly the same name would see each
+other's records.
 
 The role is read from the database on every request (not from the cookie), so deleting an
 account or changing its role takes effect immediately. The server enforces the roles; the
@@ -61,6 +78,24 @@ buttons hidden in the browser are only a convenience.
 **First run:** while no accounts exist, logging in as `admin` with the `ADMIN_PASSWORD`
 environment variable creates the first admin account. After that, `ADMIN_PASSWORD` is no
 longer used. Then open the **Users** tab to create accounts for teachers.
+
+## Export to Excel / PDF
+
+On the **Records** tab, **Export** downloads what the table is showing: the filter box, the
+sort order and an optional From / To date range are all applied. The Excel file has an
+`Attendance` sheet (real dates, colored statuses, filter buttons) and a `Summary` sheet
+(totals and rates overall, by subject and by section). The PDF has the same records with a
+summary line and page numbers. The PDF uses a built-in font, so characters outside Western
+European alphabets show as `?` there (Excel keeps every character). Up to 20,000 records
+are exported at a time.
+
+## Audit log
+
+Admins see an **Audit log** tab. The server records every record added, edited and deleted
+(a delete keeps the whole record), every class sheet save, account created or deleted, login
+and failed login for a real account, and every export. Each entry says who did it and when.
+There is no way to edit or delete entries through the portal. If writing an entry ever fails,
+the change still goes through and the error appears in the Vercel logs.
 
 ## Class sheet
 

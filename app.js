@@ -1,6 +1,8 @@
 const API = '/api/attendance';
 const SESSION_API = '/api/session';
 const USERS_API = '/api/users';
+const AUDIT_API = '/api/audit';
+const EXPORT_API = '/api/export';
 
 const loginSection = document.getElementById('login');
 const loginForm = document.getElementById('login-form');
@@ -26,6 +28,32 @@ const panelRecords = document.getElementById('panel-records');
 const panelSheet = document.getElementById('panel-sheet');
 const panelUsers = document.getElementById('panel-users');
 const tabUsersBtn = document.getElementById('tab-btn-users');
+const panelAudit = document.getElementById('panel-audit');
+const tabAuditBtn = document.getElementById('tab-btn-audit');
+const panelMe = document.getElementById('panel-me');
+const tabsNav = document.querySelector('.tabs');
+
+const meNameEl = document.getElementById('me-name');
+const meSubjectEl = document.getElementById('me-subject');
+const meTilesEl = document.getElementById('me-tiles');
+const meRateEl = document.getElementById('me-rate');
+const meRowsEl = document.getElementById('me-rows');
+const meEmptyEl = document.getElementById('me-empty');
+
+const exportFromEl = document.getElementById('export-from');
+const exportToEl = document.getElementById('export-to');
+const exportXlsxBtn = document.getElementById('export-xlsx');
+const exportPdfBtn = document.getElementById('export-pdf');
+
+const auditGroupEl = document.getElementById('audit-group');
+const auditActorEl = document.getElementById('audit-actor');
+const auditRowsEl = document.getElementById('audit-rows');
+const auditEmptyEl = document.getElementById('audit-empty');
+const auditCountEl = document.getElementById('audit-count');
+const auditMoreBtn = document.getElementById('audit-more');
+
+const newStudentFieldEl = document.getElementById('new-student-field');
+const newStudentEl = document.getElementById('new-student');
 
 const userForm = document.getElementById('user-form');
 const newUsernameEl = document.getElementById('new-username');
@@ -60,6 +88,9 @@ let records = [];
 let editingId = null;
 let toastTimer = null;
 let sheet = null; // { section, subject, date, rows: [{ studentName, status }], dirty } once a class is loaded
+let auditItems = []; // audit log entries loaded so far (admin only)
+let auditNext = null; // marker for the next (older) page, or null when there is no more
+let auditSeq = 0; // bumped on every request so a slow, outdated response can be ignored
 
 // ---- helpers ---------------------------------------------------------------
 
@@ -116,20 +147,27 @@ function formatDay(value) {
 // ---- login / logout --------------------------------------------------------
 
 const isAdmin = () => Boolean(currentUser) && currentUser.role === 'admin';
+const isStudent = () => Boolean(currentUser) && currentUser.role === 'student';
 const roleLabel = (role) => role.charAt(0).toUpperCase() + role.slice(1);
 
 function showLogin(message) {
   currentUser = null;
   records = [];
   users = [];
+  auditSeq += 1; // ignore any audit request still on its way
+  auditItems = [];
+  auditNext = null;
   editingId = null;
   closeSheet();
   userForm.reset();
+  syncRoleFields();
   selectTab('records');
   appSection.hidden = true;
   logoutBtn.hidden = true;
   userChip.hidden = true;
+  tabsNav.hidden = false;
   tabUsersBtn.hidden = true;
+  tabAuditBtn.hidden = true;
   loginSection.hidden = false;
   usernameEl.value = '';
   passwordEl.value = '';
@@ -145,8 +183,11 @@ function showApp(user) {
   logoutBtn.hidden = false;
   userChip.textContent = `${user.username} · ${roleLabel(user.role)}`;
   userChip.hidden = false;
+  toastEl.hidden = true; // do not carry a message (such as "logged out") over from the last person
+  tabsNav.hidden = isStudent(); // a student only has the one "My attendance" view
   tabUsersBtn.hidden = !isAdmin();
-  selectTab('records');
+  tabAuditBtn.hidden = !isAdmin();
+  selectTab('records'); // a student is sent to "My attendance" by selectTab
   sheetDateEl.value = todayISO();
   resetForm();
   loadRecords();
@@ -265,11 +306,13 @@ async function loadRecords() {
     refreshSuggestions();
     pickReportDay();
     renderReports();
+    if (isStudent()) renderMe();
   } catch (err) {
     records = [];
     renderRows();
     emptyEl.hidden = false;
     emptyEl.textContent = 'Could not load records.';
+    if (isStudent()) renderMe();
     reportError(err);
   }
 }
@@ -374,13 +417,17 @@ rowsEl.addEventListener('click', (event) => {
 // ---- tabs ------------------------------------------------------------------
 
 function selectTab(name) {
-  if (name === 'users' && !isAdmin()) name = 'records'; // the Users tab is admin only
+  if ((name === 'users' || name === 'audit') && !isAdmin()) name = 'records'; // admin only
+  name = isStudent() ? 'me' : (name === 'me' ? 'records' : name); // students see only their own page
   panelRecords.hidden = name !== 'records';
   panelSheet.hidden = name !== 'sheet';
   panelReports.hidden = name !== 'reports';
   panelUsers.hidden = name !== 'users';
+  panelAudit.hidden = name !== 'audit';
+  panelMe.hidden = name !== 'me';
   if (name === 'reports') renderReports();
   if (name === 'users') loadUsers();
+  if (name === 'audit') loadAudit(true);
   for (const btn of tabButtons) {
     const active = btn.dataset.tab === name;
     btn.classList.toggle('active', active);
@@ -412,7 +459,7 @@ function renderUsers() {
     const you = currentUser && u._id === currentUser._id;
     tr.append(
       cell(you ? `${u.username} (you)` : u.username, 'Username'),
-      cell(roleLabel(u.role), 'Role'),
+      cell(u.role === 'student' && u.studentName ? `Student · ${u.studentName}` : roleLabel(u.role), 'Role'),
       cell(formatDay(u.createdAt), 'Created')
     );
 
@@ -447,10 +494,12 @@ userForm.addEventListener('submit', async (event) => {
         username: newUsernameEl.value,
         password: newPasswordEl.value,
         role: newRoleEl.value,
+        studentName: newRoleEl.value === 'student' ? newStudentEl.value : undefined,
       }),
     });
     showToast(`Account "${created.username}" created.`);
     userForm.reset();
+    syncRoleFields();
     await loadUsers();
   } catch (err) {
     reportError(err);
@@ -458,6 +507,14 @@ userForm.addEventListener('submit', async (event) => {
     userAddBtn.disabled = false;
   }
 });
+
+// Only student accounts need the student's name.
+function syncRoleFields() {
+  const student = newRoleEl.value === 'student';
+  newStudentFieldEl.hidden = !student;
+  newStudentEl.required = student;
+}
+newRoleEl.addEventListener('change', syncRoleFields);
 
 usersRowsEl.addEventListener('click', async (event) => {
   const btn = event.target.closest('button[data-id]');
@@ -474,6 +531,157 @@ usersRowsEl.addEventListener('click', async (event) => {
     reportError(err);
   }
 });
+
+// ---- my attendance (student view, read only) ---------------------------------
+
+function renderMe() {
+  // Show the name as it is written in the records (the account may have been typed in lower case).
+  const shownName = (records[0] && records[0].studentName) || (currentUser && currentUser.studentName) || '';
+  meNameEl.textContent = shownName ? `· ${shownName}` : '';
+
+  const subjects = [...new Set(records.map((r) => r.subjectName))].sort((a, b) => a.localeCompare(b));
+  const keep = meSubjectEl.value;
+  meSubjectEl.replaceChildren(new Option('All subjects', ''), ...subjects.map((s) => new Option(s, s)));
+  meSubjectEl.value = subjects.includes(keep) ? keep : '';
+
+  const list = meSubjectEl.value ? records.filter((r) => r.subjectName === meSubjectEl.value) : records;
+  renderTiles(list, meTilesEl);
+  const pct = rate(list);
+  meRateEl.textContent = pct === null ? '' : `Attendance rate: ${pct}%. Present and Late count as attended; Excused is left out.`;
+
+  meRowsEl.replaceChildren();
+  for (const r of list) {
+    const tr = document.createElement('tr');
+    tr.append(cell(formatDay(r.date), 'Date'), cell(r.subjectName, 'Subject'), cell(r.section, 'Section'));
+    const statusTd = document.createElement('td');
+    statusTd.dataset.label = 'Status';
+    const badge = document.createElement('span');
+    badge.className = `badge ${r.status}`;
+    badge.textContent = r.status;
+    statusTd.append(badge);
+    tr.append(statusTd);
+    meRowsEl.append(tr);
+  }
+  meEmptyEl.hidden = list.length > 0;
+  meEmptyEl.textContent = records.length
+    ? 'No records for this subject.'
+    : 'No attendance has been recorded for you yet.';
+}
+
+meSubjectEl.addEventListener('change', renderMe);
+
+// ---- export to Excel / PDF -----------------------------------------------------
+
+async function downloadExport(format) {
+  const params = new URLSearchParams({ format });
+  const q = filterEl.value.trim();
+  if (q) params.set('q', q);
+  if (exportFromEl.value) params.set('from', exportFromEl.value);
+  if (exportToEl.value) params.set('to', exportToEl.value);
+  if (sort.key) { // same order as the table on screen
+    params.set('sort', sort.key);
+    params.set('dir', String(sort.dir));
+  }
+
+  const buttons = [exportXlsxBtn, exportPdfBtn];
+  for (const b of buttons) b.disabled = true;
+  showToast('Preparing your file...');
+  try {
+    const res = await fetch(`${EXPORT_API}?${params}`);
+    if (!res.ok) {
+      if (res.status === 401) {
+        showLogin('Your session has ended. Please log in again.');
+        return;
+      }
+      let message = `Export failed (${res.status}).`;
+      try { message = (await res.json()).error || message; } catch { /* not JSON */ }
+      throw new Error(message);
+    }
+    const blob = await res.blob();
+    const named = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '');
+    const url = URL.createObjectURL(blob);
+    const link = Object.assign(document.createElement('a'), { href: url, download: named ? named[1] : `attendance.${format}` });
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    showToast('Your download has started.');
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    for (const b of buttons) b.disabled = false;
+  }
+}
+
+exportXlsxBtn.addEventListener('click', () => downloadExport('xlsx'));
+exportPdfBtn.addEventListener('click', () => downloadExport('pdf'));
+
+// ---- audit log (admin only) ----------------------------------------------------
+
+// Loads the first page (reset) or the next, older page.
+async function loadAudit(reset) {
+  const seq = ++auditSeq;
+  const params = new URLSearchParams({ limit: '50' });
+  if (auditGroupEl.value) params.set('group', auditGroupEl.value);
+  if (auditActorEl.value) params.set('actor', auditActorEl.value);
+  if (!reset && auditNext) params.set('before', auditNext);
+  auditMoreBtn.disabled = true;
+  try {
+    const page = await request(`${AUDIT_API}?${params}`);
+    if (seq !== auditSeq) return; // a newer request (or a logout) replaced this one
+    auditItems = reset ? page.items : [...auditItems, ...page.items];
+    auditNext = page.nextBefore;
+    if (page.actors) fillAuditActors(page.actors);
+    renderAudit();
+  } catch (err) {
+    if (seq === auditSeq) reportError(err);
+  } finally {
+    auditMoreBtn.disabled = false;
+  }
+}
+
+function fillAuditActors(actors) {
+  const keep = auditActorEl.value;
+  auditActorEl.replaceChildren(new Option('Everyone', ''), ...actors.map((a) => new Option(a, a)));
+  auditActorEl.value = actors.includes(keep) ? keep : '';
+}
+
+function renderAudit() {
+  auditRowsEl.replaceChildren();
+  for (const e of auditItems) {
+    const tr = document.createElement('tr');
+
+    const when = cell(new Date(e.at).toLocaleString(), 'When');
+    when.className = 'audit-when';
+
+    const who = cell(e.actor ? `${e.actor}${e.actorRole ? ` (${e.actorRole})` : ''}` : 'System', 'Who');
+
+    const what = document.createElement('td');
+    what.className = 'audit-what';
+    what.dataset.label = 'What happened';
+    what.append(document.createTextNode(e.summary));
+    if (e.details) {
+      const box = document.createElement('details');
+      box.className = 'audit-details';
+      const label = document.createElement('summary');
+      label.textContent = 'Details';
+      const pre = document.createElement('pre');
+      pre.textContent = JSON.stringify(e.details, null, 2);
+      box.append(label, pre);
+      what.append(box);
+    }
+
+    tr.append(when, who, what);
+    auditRowsEl.append(tr);
+  }
+  auditCountEl.textContent = auditItems.length ? `(${auditItems.length}${auditNext ? '+' : ''} shown)` : '';
+  auditEmptyEl.hidden = auditItems.length > 0;
+  auditMoreBtn.hidden = !auditNext;
+}
+
+auditGroupEl.addEventListener('change', () => loadAudit(true));
+auditActorEl.addEventListener('change', () => loadAudit(true));
+auditMoreBtn.addEventListener('click', () => loadAudit(false));
 
 // ---- class sheet -----------------------------------------------------------
 
@@ -492,6 +700,7 @@ function refreshSuggestions() {
   };
   fill('section-list', records.map((r) => r.section));
   fill('subject-list', records.map((r) => r.subjectName));
+  fill('student-list', records.map((r) => r.studentName)); // for the student-name field when adding an account
 }
 
 function setSheetLocked(locked) {
@@ -737,8 +946,8 @@ function skelRow() {
   return tr;
 }
 
-function renderTiles(list) {
-  tilesEl.replaceChildren();
+function renderTiles(list, target = tilesEl) {
+  target.replaceChildren();
   for (const s of ['Total', ...STATUSES]) {
     const tile = document.createElement('div');
     tile.className = `tile ${s}`;
@@ -747,7 +956,7 @@ function renderTiles(list) {
     const label = document.createElement('span');
     label.textContent = s;
     tile.append(num, label);
-    tilesEl.append(tile);
+    target.append(tile);
   }
 }
 
