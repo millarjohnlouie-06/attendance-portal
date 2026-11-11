@@ -232,3 +232,13 @@ label.inline { flex-direction: row; align-items: center; gap: 8px; }
   .seg { display: flex; width: 100%; }
   .seg-btn { flex: 1; padding: 8px 2px; }
 }
+
+/* ---- export bar, audit log, student view ---- */
+.export-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 0 0 12px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 8px; font-size: 0.9rem; }
+.export-bar .inline input { min-width: 0; }
+.audit-filters { display: flex; gap: 12px; flex-wrap: wrap; }
+.audit-when { color: var(--muted); font-size: 0.85rem; }
+td.audit-what { white-space: normal; min-width: 280px; }
+.audit-details summary { cursor: pointer; color: var(--accent); font-size: 0.8rem; margin-top: 4px; }
+.audit-details pre { margin: 6px 0 0; padding: 8px 10px; background: var(--stripe); border: 1px solid var(--line); border-radius: 6px; font-size: 0.78rem; overflow: auto; max-height: 220px; white-space: pre-wrap; word-break: break-word; }
+.me-rate { margin: 0 0 14px; font-weight: 600; }

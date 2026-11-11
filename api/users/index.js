@@ -1,5 +1,6 @@
 const { requireRole } = require('../../lib/auth');
 const { listUsers, createUser, validateNewUser, publicUser } = require('../../lib/users');
+const { logEvent } = require('../../lib/audit');
 
 // Admin only.
 // GET  /api/users -> list accounts (never includes password hashes)
@@ -22,7 +23,13 @@ module.exports = async function handler(req, res) {
 
       const created = await createUser(data);
       if (created.error) return res.status(409).json({ error: created.error });
-      return res.status(201).json(publicUser(created.user));
+
+      const info = publicUser(created.user);
+      const linked = info.studentName ? ` (student: ${info.studentName})` : '';
+      await logEvent(admin, 'user.create', `Created ${info.role} account "${info.username}"${linked}`, {
+        username: info.username, role: info.role, studentName: info.studentName || null,
+      });
+      return res.status(201).json(info);
     }
 
     res.setHeader('Allow', 'GET, POST');

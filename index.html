@@ -50,7 +50,35 @@
         <button type="button" role="tab" id="tab-btn-sheet" class="tab" data-tab="sheet" aria-selected="false" aria-controls="panel-sheet">Class sheet</button>
         <button type="button" role="tab" id="tab-btn-reports" class="tab" data-tab="reports" aria-selected="false" aria-controls="panel-reports">Reports</button>
         <button type="button" role="tab" id="tab-btn-users" class="tab" data-tab="users" aria-selected="false" aria-controls="panel-users" hidden>Users</button>
+        <button type="button" role="tab" id="tab-btn-audit" class="tab" data-tab="audit" aria-selected="false" aria-controls="panel-audit" hidden>Audit log</button>
       </nav>
+
+      <div id="panel-me" role="tabpanel" aria-labelledby="me-title" hidden>
+        <section class="card" aria-labelledby="me-title">
+          <div class="list-head">
+            <h2 id="me-title">My attendance <span id="me-name" class="muted"></span></h2>
+            <label class="inline">Subject
+              <select id="me-subject"><option value="">All subjects</option></select>
+            </label>
+          </div>
+          <div id="me-tiles" class="tiles" role="group" aria-label="My attendance totals"></div>
+          <p id="me-rate" class="me-rate"></p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Subject</th>
+                  <th>Section</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="me-rows"></tbody>
+            </table>
+          </div>
+          <p id="me-empty" class="muted empty" hidden></p>
+        </section>
+      </div>
 
       <div id="panel-records" role="tabpanel" aria-labelledby="tab-btn-records">
       <div id="tiles" class="tiles" role="group" aria-label="Attendance totals"></div>
@@ -90,6 +118,15 @@
         <div class="list-head">
           <h2 id="list-title">Records <span id="count" class="muted"></span></h2>
           <input type="search" id="filter" placeholder="Filter by name, subject or section" aria-label="Filter records">
+        </div>
+
+        <div class="export-bar">
+          <strong>Export</strong>
+          <label class="inline">From <input type="date" id="export-from" aria-label="Export from date"></label>
+          <label class="inline">To <input type="date" id="export-to" aria-label="Export to date"></label>
+          <button type="button" id="export-xlsx" class="btn small">Excel (.xlsx)</button>
+          <button type="button" id="export-pdf" class="btn small">PDF</button>
+          <span class="muted">Uses the filter above and the order of the table.</span>
         </div>
 
         <div class="table-wrap">
@@ -213,8 +250,13 @@
                 <select id="new-role">
                   <option value="teacher">Teacher (add and edit)</option>
                   <option value="admin">Admin (also delete, manage accounts)</option>
+                  <option value="student">Student (sees only their own attendance)</option>
                 </select>
               </label>
+              <label id="new-student-field" hidden>Student name (as written in the records)
+                <input type="text" id="new-student" maxlength="100" list="student-list" autocomplete="off">
+              </label>
+              <datalist id="student-list"></datalist>
             </div>
             <div class="actions">
               <button type="submit" id="user-add-btn" class="btn primary">Add account</button>
@@ -238,6 +280,46 @@
             </table>
           </div>
           <p id="users-empty" class="muted empty" hidden>No accounts yet.</p>
+        </section>
+      </div>
+
+      <div id="panel-audit" role="tabpanel" aria-labelledby="tab-btn-audit" hidden>
+        <section class="card" aria-labelledby="audit-title">
+          <div class="list-head">
+            <h2 id="audit-title">Audit log <span id="audit-count" class="muted"></span></h2>
+            <div class="audit-filters">
+              <label class="inline">Type
+                <select id="audit-group">
+                  <option value="">Everything</option>
+                  <option value="record">Records</option>
+                  <option value="sheet">Class sheets</option>
+                  <option value="user">Accounts</option>
+                  <option value="login">Logins</option>
+                  <option value="export">Exports</option>
+                </select>
+              </label>
+              <label class="inline">Person
+                <select id="audit-actor"><option value="">Everyone</option></select>
+              </label>
+            </div>
+          </div>
+          <p class="muted sheet-note">Every change is recorded here with who made it and when. Entries cannot be edited or removed. Times are shown in your time zone.</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>Who</th>
+                  <th>What happened</th>
+                </tr>
+              </thead>
+              <tbody id="audit-rows"></tbody>
+            </table>
+          </div>
+          <p id="audit-empty" class="muted empty" hidden>Nothing recorded yet.</p>
+          <div class="actions">
+            <button type="button" id="audit-more" class="btn" hidden>Load more</button>
+          </div>
         </section>
       </div>
     </div>
